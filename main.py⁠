@@ -1,0 +1,56 @@
+import os
+import requests
+from datetime import datetime
+
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+def get_premarket_data():
+    today = datetime.now().strftime('%Y-%m-%d')
+    url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{today}?adjusted=true&apiKey={POLYGON_API_KEY}"
+    response = requests.get(url).json()
+    
+    results = response.get('results', [])
+    if not results:
+        return "本日のデータが取得できませんでした（市場休業日の可能性があります）。"
+
+    top_volume = sorted(results, key=lambda x: x.get('v', 0), reverse=True)[:3]
+    top_ticks = sorted(results, key=lambda x: x.get('n', 0), reverse=True)[:3]
+
+    message = f"📊 **【米国株プレマーケット集計レポート ({today} 17:00-21:00)】**\n\n"
+    
+    message += "🔥 **出来高 (Volume) TOP 3**\n"
+    for item in top_volume:
+        ticker = item.get('T')
+        vol = item.get('v', 0)
+        ticks = item.get('n', 0)
+        message += f"• **{ticker}**: 出来高 {vol:,} | 注文数(Tick) {ticks:,}\n"
+        news = get_latest_news(ticker)
+        message += f"  📰 ニュース: {news}\n"
+
+    message += "\n⚡ **ティック数 (約定回数) TOP 3**\n"
+    for item in top_ticks:
+        ticker = item.get('T')
+        vol = item.get('v', 0)
+        ticks = item.get('n', 0)
+        message += f"• **{ticker}**: 注文数(Tick) {ticks:,} | 出来高 {vol:,}\n"
+
+    return message
+
+def get_latest_news(ticker):
+    url = f"https://api.polygon.io/v2/reference/news?ticker={ticker}&limit=1&apiKey={POLYGON_API_KEY}"
+    res = requests.get(url).json()
+    results = res.get('results', [])
+    if results:
+        title = results[0].get('title')
+        article_url = results[0].get('article_url')
+        return f"[{title}]({article_url})"
+    return "直近の主要ニュースなし"
+
+def send_discord(content):
+    payload = {"content": content}
+    requests.post(DISCORD_WEBHOOK_URL, json=payload)
+
+if __name__ == "__main__":
+    report = get_premarket_data()
+    send_discord(report)
